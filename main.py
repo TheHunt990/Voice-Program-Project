@@ -102,8 +102,7 @@ class App(tk.Tk):
         self.event_queue.put(("error", message))
 
     def _poll_queue(self):
-        """Runs on the main thread every 50ms — the only place GUI
-        widgets get touched, which keeps Tkinter happy."""
+        #Runs on the main thread every 50ms
         try:
             while True:
                 kind, payload = self.event_queue.get_nowait()
@@ -123,18 +122,15 @@ class App(tk.Tk):
         finally:
             self.after(50, self._poll_queue)
 
-    def _append_transcript(self, line):
-        """Add a plain, already-finished line (errors, mode-launch
-        notices) — not part of the live partial-line mechanism."""
+    def _append_transcript(self, line):       
         self.transcript_box.configure(state="normal")
         self.transcript_box.insert("end", line + "\n")
         self.transcript_box.see("end")
         self.transcript_box.configure(state="disabled")
 
     def _update_partial_line(self, text):
-        """Called repeatedly while Vosk is still guessing mid-phrase.
-        Rewrites the same line in place instead of appending a new one
-        each time, which is what makes the transcript feel live."""
+        # Called repeatedly while Vosk is still guessing mid-phrase
+        # Rewrites the same line in place instead of appending a new one each time, which is what makes the transcript feel live
         self.transcript_box.configure(state="normal")
         if not self._live_line_active:
             self._live_line_start = self.transcript_box.index("end-1c")
@@ -146,9 +142,7 @@ class App(tk.Tk):
         self.transcript_box.configure(state="disabled")
 
     def _commit_final_line(self, text):
-        """Called once Vosk decides the phrase is complete. Replaces
-        whatever partial guess was on screen with the final text and
-        closes off the line with a newline."""
+        # Called once Vosk decides the phrase is complete. Replaces whatever partial guess was on screen with the final text and closes off the line with a newline
         self.transcript_box.configure(state="normal")
         if self._live_line_active:
             self.transcript_box.delete(self._live_line_start, "end-1c")
