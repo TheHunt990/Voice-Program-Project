@@ -158,6 +158,11 @@ class App(tk.Tk):
         self.transcript_box.configure(state="disabled")
 
     def _check_voice_commands(self, text):
+        # a mode window gets first refusal on everything it hears
+        if self.active_mode is not None:
+            self.active_mode.handle_voice(text)
+            return
+
         lowered = text.lower()
         if any(trigger in lowered for trigger in SECOND_BRAIN_PHRASES):
             self.launch_second_brain_mode()

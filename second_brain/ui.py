@@ -50,7 +50,7 @@ class SecondBrainWindow(tk.Toplevel):
         ttk.Button(header, text="← Back to hub", command=self.close).pack(side="right")
 
         self.heard_label = ttk.Label(
-            self, text="Heard: —", font=("Segoe UI", 9, "italic"), foreground="#555555"
+            self, text="Heard: ", font=("Segoe UI", 9, "italic"), foreground="#555555"
         )
         self.heard_label.pack(anchor="w", padx=16, pady=(0, 8))
 
@@ -135,10 +135,9 @@ class SecondBrainWindow(tk.Toplevel):
         ttk.Button(note_btns, text="Save note", command=self.add_note_from_entry).pack(side="left")
         ttk.Button(note_btns, text="Delete selected", command=self.delete_selected_note).pack(side="left", padx=(6, 0))
 
-    # ---------- calendar ----------
-
+    # calendar
     def _refresh_calendar(self):
-        """Rebuilds the day buttons for the currently viewed month."""
+        # Rebuilds the day buttons for the currently viewed month.
         # Clear old day buttons (row 0 holds the weekday headers, keep those)
         for child in self.grid_frame.winfo_children():
             info = child.grid_info()
@@ -177,8 +176,7 @@ class SecondBrainWindow(tk.Toplevel):
                 btn.grid(row=row, column=col, padx=1, pady=1)
 
     def _days_with_events(self, year, month):
-        """Day numbers in this month that have at least one event, so
-        the grid can mark them."""
+        #Day numbers in this month that have at least one event, so the grid can mark them
         prefix = f"{year:04d}-{month:02d}-"
         days = set()
         for date_str in self.events:
@@ -192,7 +190,7 @@ class SecondBrainWindow(tk.Toplevel):
         self._refresh_events()
 
     def prev_month(self):
-        # Step back a day from the 1st to land in the previous month —
+        # Step back a day from the 1st to land in the previous month
         # avoids hand-rolling the year rollover.
         first = date(self.view_year, self.view_month, 1)
         previous = first - timedelta(days=1)
@@ -210,8 +208,7 @@ class SecondBrainWindow(tk.Toplevel):
         self.view_year, self.view_month = today.year, today.month
         self.select_date(today)
 
-    # ---------- events ----------
-
+    # events 
     def _date_key(self):
         return self.selected_date.strftime("%Y-%m-%d")
 
@@ -249,8 +246,7 @@ class SecondBrainWindow(tk.Toplevel):
         self._refresh_events()
         self._refresh_calendar()
 
-    # ---------- notes ----------
-
+    # notes
     def _refresh_notes(self):
         self.notes_list.delete(0, "end")
         self._note_ids = []
@@ -283,9 +279,48 @@ class SecondBrainWindow(tk.Toplevel):
         self.notes = [n for n in self.notes if n["id"] != note_id]
         self._refresh_notes()
 
+    # voice
     def handle_voice(self, text):
-        # Voice commands not there yet so shows what was heard
+        # Called by the hub with each finalized phrase while this window is open
         self.heard_label.config(text=f"Heard: {text}")
+        lowered = text.lower().strip()
+
+        # Navigation first — checked before the note/event prefixes so
+        # "go back" can't accidentally get eaten as note text.
+        if lowered in ("go back", "main menu", "close", "back to hub"):
+            self.close()
+            return
+        if lowered == "next month":
+            self.next_month()
+            return
+        if lowered in ("last month", "previous month"):
+            self.prev_month()
+            return
+        if lowered in ("today", "go to today"):
+            self.go_today()
+            return
+
+        # Content commands — everything after the keyword is the
+        # payload, sliced from the ORIGINAL text (not lowered) so notes
+        # and events keep their natural capitalization.
+        for prefix in ("add note ", "new note ", "note "):
+            if lowered.startswith(prefix):
+                self.add_note(text[len(prefix):])
+                self._say("Note saved")
+                return
+
+        for prefix in ("add event ", "new event ", "event "):
+            if lowered.startswith(prefix):
+                self.add_event(text[len(prefix):])
+                self._say("Event added")
+                return
+
+        # Didn't match anything — heard_label already shows what came
+        # through, so just leave it at that rather than guessing.
+
+    def _say(self, message):
+        if self.speaker:
+            self.speaker.say(message)
 
     def close(self):
         if self._on_close_callback:
