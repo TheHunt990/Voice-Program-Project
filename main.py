@@ -5,6 +5,7 @@ from pathlib import Path
 from tkinter import ttk
 from core.listener import VoiceListener
 from core.speaker import VoiceSpeaker
+from second_brain.ui import SecondBrainWindow
 
 # Voice phrases that trigger each mode
 SECOND_BRAIN_PHRASES = ["second brain", "notes mode", "task mode"]
@@ -30,6 +31,8 @@ class App(tk.Tk):
         )
         self._live_line_active = False
         self._live_line_start = None
+        # When a mode window is open, voice goes to it instead of to the hub's own trigger words - so saying "note buy milk" inside Second Brain doesn't get mistaken for a hub command
+        self.active_mode = None
         self._build_ui()
         self._set_status("starting up...", level="starting")
         self._start_listening()
@@ -163,8 +166,23 @@ class App(tk.Tk):
 
     # Mode launching
     def launch_second_brain_mode(self):
+        # Already open then bring it forward rather than opening a new one
+        if self.active_mode is not None:
+            self.active_mode.lift()
+            return
+
         self._append_transcript("Launching Second Brain mode...")
         print("Launching Second Brain mode...")
+        self.speaker.say("Launching Second Brain mode...")
+        self.active_mode = SecondBrainWindow(self, speaker=self.speaker, on_close=self.mode_closed)
+        self.withdraw() # hide the hub while a mode is open
+
+    def mode_closed(self):
+        # Called by a mode window as it closes, so voice goes back to the main hub
+        self.active_mode = None
+        self._append_transcript("Back at the main hub")
+        self.deiconify() # restore the hub window
+        self.lift()
 
     def launch_adventure_mode(self):
         self._append_transcript("Launching Choose your adventure mode...")

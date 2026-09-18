@@ -9,7 +9,7 @@ class VoiceSpeaker:
 
     def say(self, text):
        
-        def _speak(self, text):
+        def _speak():
             with self._lock:
                 self.engine.say(text)
                 self.engine.runAndWait()
