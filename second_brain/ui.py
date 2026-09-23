@@ -2,8 +2,9 @@
 """
 add note <text>  -> saves a note
 add event <text> -> saves an event on the selected day
+add event <text with date like september 25 at 3pm> -> saves event on the day said with a time
 next month  -> calendar foward
-last month/previous  -> calender back
+last month  -> calender back
 today  -> jump back to today
 go back/main menu  -> close and return to main hub
 """
@@ -12,6 +13,8 @@ import calendar
 import tkinter as tk
 from datetime import date, datetime, timedelta
 from tkinter import ttk
+
+from .parser import parse_event_command
 
 WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
 
@@ -50,7 +53,7 @@ class SecondBrainWindow(tk.Toplevel):
         ttk.Button(header, text="← Back to hub", command=self.close).pack(side="right")
 
         self.heard_label = ttk.Label(
-            self, text="Heard: ", font=("Segoe UI", 9, "italic"), foreground="#555555"
+            self, text="Heard: —", font=("Segoe UI", 9, "italic"), foreground="#555555"
         )
         self.heard_label.pack(anchor="w", padx=16, pady=(0, 8))
 
@@ -136,8 +139,9 @@ class SecondBrainWindow(tk.Toplevel):
         ttk.Button(note_btns, text="Delete selected", command=self.delete_selected_note).pack(side="left", padx=(6, 0))
 
     # calendar
+
     def _refresh_calendar(self):
-        # Rebuilds the day buttons for the currently viewed month.
+        #Rebuilds the day buttons for the currently viewed month
         # Clear old day buttons (row 0 holds the weekday headers, keep those)
         for child in self.grid_frame.winfo_children():
             info = child.grid_info()
@@ -176,7 +180,7 @@ class SecondBrainWindow(tk.Toplevel):
                 btn.grid(row=row, column=col, padx=1, pady=1)
 
     def _days_with_events(self, year, month):
-        #Day numbers in this month that have at least one event, so the grid can mark them
+        # Day numbers in this month that have at least one event, so the grid can mark them
         prefix = f"{year:04d}-{month:02d}-"
         days = set()
         for date_str in self.events:
@@ -190,7 +194,7 @@ class SecondBrainWindow(tk.Toplevel):
         self._refresh_events()
 
     def prev_month(self):
-        # Step back a day from the 1st to land in the previous month
+        # Step back a day from the 1st to land in the previous month —
         # avoids hand-rolling the year rollover.
         first = date(self.view_year, self.view_month, 1)
         previous = first - timedelta(days=1)
@@ -209,6 +213,7 @@ class SecondBrainWindow(tk.Toplevel):
         self.select_date(today)
 
     # events 
+
     def _date_key(self):
         return self.selected_date.strftime("%Y-%m-%d")
 
@@ -220,14 +225,17 @@ class SecondBrainWindow(tk.Toplevel):
             self.events_list.insert("end", event["text"])
             self._event_ids.append(event["id"])
 
-    def add_event(self, text):
+    def add_event(self, text, target_date=None):
         text = text.strip()
         if not text:
             return
-        events_for_day = self.events.setdefault(self._date_key(), [])
+        target_date = target_date or self.selected_date
+        key = target_date.strftime("%Y-%m-%d")
+        events_for_day = self.events.setdefault(key, [])
         events_for_day.append({"id": self._next_event_id, "text": text})
         self._next_event_id += 1
-        self._refresh_events()
+        if target_date == self.selected_date:
+            self._refresh_events()
         self._refresh_calendar()  # so the day picks up its marker
 
     def add_event_from_entry(self):
@@ -246,7 +254,8 @@ class SecondBrainWindow(tk.Toplevel):
         self._refresh_events()
         self._refresh_calendar()
 
-    # notes
+    # notes 
+
     def _refresh_notes(self):
         self.notes_list.delete(0, "end")
         self._note_ids = []
@@ -279,7 +288,8 @@ class SecondBrainWindow(tk.Toplevel):
         self.notes = [n for n in self.notes if n["id"] != note_id]
         self._refresh_notes()
 
-    # voice
+    # voice 
+
     def handle_voice(self, text):
         # Called by the hub with each finalized phrase while this window is open
         self.heard_label.config(text=f"Heard: {text}")
@@ -311,8 +321,25 @@ class SecondBrainWindow(tk.Toplevel):
 
         for prefix in ("add event ", "new event ", "event "):
             if lowered.startswith(prefix):
-                self.add_event(text[len(prefix):])
-                self._say("Event added")
+                payload = text[len(prefix):]
+                parsed = parse_event_command(payload)
+
+                display_text = parsed["title"]
+                if parsed["time"]:
+                    display_text += f" at {parsed['time']}"
+
+                target_date = parsed["date"] or self.selected_date
+                self.add_event(display_text, target_date=target_date)
+
+                # Jump the calendar to show where it landed, so a date
+                # said by voice is visibly confirmed, not just trusted.
+                self.view_year, self.view_month = target_date.year, target_date.month
+                self.select_date(target_date)
+
+                if parsed["date"]:
+                    self._say(f"Event added for {target_date.strftime('%B')} {target_date.day}")
+                else:
+                    self._say("Event added")
                 return
 
         # Didn't match anything — heard_label already shows what came
