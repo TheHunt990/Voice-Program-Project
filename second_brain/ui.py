@@ -7,14 +7,20 @@ next month  -> calendar foward
 last month  -> calender back
 today  -> jump back to today
 go back/main menu  -> close and return to main hub
+tomorrow -> goes to the next day from what is selected
+go to/jump to/select <date> -> selects the chosen date
+open note/read note/show note <number> -> opens the note selected
 """
+
+try:
+    from .parser import parse_event_command, parse_date_phrase, parse_number  # when imported as part of the package (main.py)
+except ImportError:
+    from parser import parse_event_command, parse_date_phrase, parse_number # when run standalone (e.g. Code Runner on this file)
 
 import calendar
 import tkinter as tk
 from datetime import date, datetime, timedelta
 from tkinter import ttk
-
-from .parser import parse_event_command
 
 WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
 
@@ -193,6 +199,12 @@ class SecondBrainWindow(tk.Toplevel):
         self._refresh_calendar()
         self._refresh_events()
 
+    def _jump_to_date(self, new_date):
+        """Moves the visible month (if needed) AND selects the date
+        select_date alone won't scroll the grid to a different month"""
+        self.view_year, self.view_month = new_date.year, new_date.month
+        self.select_date(new_date)
+
     def prev_month(self):
         # Step back a day from the 1st to land in the previous month —
         # avoids hand-rolling the year rollover.
@@ -288,6 +300,48 @@ class SecondBrainWindow(tk.Toplevel):
         self.notes = [n for n in self.notes if n["id"] != note_id]
         self._refresh_notes()
 
+    def _on_note_double_click(self, event):
+            selection = self.notes_list.curselection()
+            if not selection:
+                return
+            self.open_note_by_index(selection[0])
+    
+    def open_note_by_index(self, index):
+            """index is 0-based, matching self._note_ids' order (which is
+            the same order shown in the list, numbered from 1 on screen)."""
+            if index < 0 or index >= len(self._note_ids):
+                self._say("I couldn't find that note")
+                return
+            note_id = self._note_ids[index]
+            note = next((n for n in self.notes if n["id"] == note_id), None)
+            if note:
+                self._show_note_popup(note)
+    
+    def _show_note_popup(self, note):
+            """Full-text view for a note — the list truncates long notes,
+            this shows the whole thing in a scrollable, read-only box."""
+            popup = tk.Toplevel(self)
+            popup.title("Note")
+            popup.geometry("480x360")
+            popup.minsize(360, 240)
+    
+            ttk.Label(
+                popup, text=note["created"], font=("Segoe UI", 9, "italic"), foreground="#555555"
+            ).pack(anchor="w", padx=12, pady=(12, 4))
+    
+            text_frame = ttk.Frame(popup)
+            text_frame.pack(fill="both", expand=True, padx=12, pady=(0, 8))
+    
+            text_widget = tk.Text(text_frame, wrap="word", font=("Segoe UI", 11))
+            scrollbar = ttk.Scrollbar(text_frame, command=text_widget.yview)
+            text_widget.configure(yscrollcommand=scrollbar.set)
+            text_widget.insert("1.0", note["text"])
+            text_widget.configure(state="disabled")  # read-only — editing isn't wired up yet
+            text_widget.pack(side="left", fill="both", expand=True)
+            scrollbar.pack(side="right", fill="y")
+    
+            ttk.Button(popup, text="Close", command=popup.destroy).pack(pady=(0, 12))
+
     # voice 
 
     def handle_voice(self, text):
@@ -309,6 +363,33 @@ class SecondBrainWindow(tk.Toplevel):
         if lowered in ("today", "go to today"):
             self.go_today()
             return
+        if lowered == "tomorrow":
+            # Relative to whatever day is currently SELECTED, not
+            # necessarily today - lets you say tomorrow repeatedly to
+            # step forward day by day from wherever you've navigated to
+            self._jump_to_date(self.selected_date + timedelta(days=1))
+
+        # "go to october 9" / "jump to next friday" / "select tomorrow"
+        for prefix in ("go to ", "jump to ", "select "):
+            if lowered.startswith(prefix):
+                phrase = text[len(prefix):]
+                target = parse_date_phrase(phrase)
+                if target:
+                    self._jump_to_date(target)
+                    self.say(f"Showing {target.strftime('%B')} {target.day}")
+                else:
+                    self._say("Sorry, I didn't catch that date")
+                return 
+
+        # "open note 3" - opens the note numbered 3 in the list on screen
+        for prefix in ("open note ", "read note ", "show note "):
+            if lowered.startswith(prefix):
+                number = parse_number(text[len(prefix):])
+                if number is not None:
+                    self.open_note_by_index(number - 1)
+                else:
+                    self._say("Which note number?")
+                return
 
         # Content commands — everything after the keyword is the
         # payload, sliced from the ORIGINAL text (not lowered) so notes

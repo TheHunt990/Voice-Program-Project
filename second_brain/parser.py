@@ -125,7 +125,23 @@ _DAY_FIRST = re.compile(
 )
  
 _BOUNDARY_WORD = re.compile(r"^(on|for|at|the|of)\b[,]?\s*|\s*[,]?\b(on|for|at|the|of)$", re.IGNORECASE)
- 
+
+def parse_number(raw_text):
+    """Parses a spoken number - digit or word form, cardinal or ordinal
+    ('3', 'three', 'third' all -> 3) - for commands like 'open note 3' 
+    Returns an int, or None if nothing recognizable was said"""
+    normalized = _normalize_number_words(raw_text.strip())
+    match = re.search(r"\d+", normalized)
+    return int(match.group()) if match else None
+
+def parse_date_phrase(raw_text, today=None):
+    """Parses a bare date phrase with no title/time attached - for navigation commands like 'go to october 9' or 'jump to next fridat'
+    Returns a date, or None if nothing recognizable was said"""
+    if today is None:
+        today = date.today()
+    working = _normalize_number_words(raw_text.strip())
+    result, _ = _extract_date(working, today)
+    return result
  
 def parse_event_command(raw_text, today=None):
     """
@@ -149,7 +165,6 @@ def parse_event_command(raw_text, today=None):
         title = "Untitled event"
  
     return {"title": title, "date": event_date, "time": time_str}
- 
  
 def _extract_time(text):
     """Finds the first time expression anywhere in text. Returns
