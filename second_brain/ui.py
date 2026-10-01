@@ -36,9 +36,13 @@ class SecondBrainWindow(tk.Toplevel):
 
         # In-memory storage for now — notes/events vanish on close until
         # storage.py gets wired in.
-        self.notes = []
+        # Notes are grouped by title (lowercased key) rather than being
+        # one flat list — adding a note under a title that already
+        # exists appends a new timestamped entry to that same note
+        # instead of creating a separate one, which is what lets
+        # same-title notes "link into one big note" over time.
+        self.notes = {} # key (lowercased title) -> {"title": str, "entries": [{"text", "created"}]}
         self.events = {}
-        self._next_note_id = 1
         self._next_event_id = 1
 
         today = date.today()
@@ -132,6 +136,11 @@ class SecondBrainWindow(tk.Toplevel):
         self.notes_list.configure(yscrollcommand=notes_scroll.set)
         self.notes_list.pack(side="left", fill="both", expand=True)
         notes_scroll.pack(side="right", fill="y")
+        self.notes_list.bind("<Double-Button-1>", self._on_note_double_click)
+
+        ttk.Label(panel, text="Title:", font=("Segoe UI", 9)).pack(anchor="w", padx=10, pady=(4, 0))
+        self.note_title_entry = ttk.Entry(panel)
+        self.note_title_entry.pack(fill="x", padx=10, pady=(0, 6))
 
         ttk.Label(panel, text="New note:", font=("Segoe UI", 9)).pack(anchor="w", padx=10)
 
@@ -268,79 +277,97 @@ class SecondBrainWindow(tk.Toplevel):
 
     # notes 
 
+    def _note_key(self, title):
+        return title.lower().strip()
+
     def _refresh_notes(self):
         self.notes_list.delete(0, "end")
-        self._note_ids = []
-        # Newest first — most recent thought is the one you want to see.
-        for note in sorted(self.notes, key=lambda n: n["id"], reverse=True):
-            self.notes_list.insert("end", f"[{note['created']}]  {note['text']}")
-            self._note_ids.append(note["id"])
+        self._note_keys = []
+        # Most recently added-to first, so active notes stay near the top.
+        ordered = sorted(
+            self.notes.values(),
+            key=lambda g: g["entries"][-1]["created"] if g["entries"] else "",
+            reverse=True,
+        )
+        for i, group in enumerate(ordered, start=1):
+            count = len(group["entries"])
+            suffix = f" ({count} entries)" if count > 1 else ""
+            self.notes_list.insert("end", f"{i}. {group['title']}{suffix}")
+            self._note_keys.append(self._note_key(group["title"]))
 
-    def add_note(self, text):
+    def add_note(self, title, text):
+        title = title.strip()
         text = text.strip()
-        if not text:
+        if not title or not text:
             return
-        self.notes.append({
-            "id": self._next_note_id,
+        key = self._note_key(title)
+        group = self.notes.setdefault(key, {"title": title, "entries": []})
+        group["entries"].append({
             "text": text,
             "created": datetime.now().strftime("%Y-%m-%d %H:%M"),
         })
-        self._next_note_id += 1
         self._refresh_notes()
-
+   
     def add_note_from_entry(self):
-        self.add_note(self.note_text.get("1.0", "end"))
-        self.note_text.delete("1.0", "end")
-
+           title = self.note_title_entry.get()
+           text = self.note_text.get("1.0", "end")
+           self.add_note(title, text)
+           self.note_title_entry.delete(0, "end")
+           self.note_text.delete("1.0", "end")
+   
     def delete_selected_note(self):
-        selection = self.notes_list.curselection()
-        if not selection:
-            return
-        note_id = self._note_ids[selection[0]]
-        self.notes = [n for n in self.notes if n["id"] != note_id]
-        self._refresh_notes()
-
+           """Deletes the whole note (every entry under that title) — not
+           just the most recent entry."""
+           selection = self.notes_list.curselection()
+           if not selection:
+               return
+           key = self._note_keys[selection[0]]
+           self.notes.pop(key, None)
+           self._refresh_notes()
+   
     def _on_note_double_click(self, event):
-            selection = self.notes_list.curselection()
-            if not selection:
-                return
-            self.open_note_by_index(selection[0])
-    
+           selection = self.notes_list.curselection()
+           if not selection:
+               return
+           self.open_note_by_index(selection[0])
+   
     def open_note_by_index(self, index):
-            """index is 0-based, matching self._note_ids' order (which is
-            the same order shown in the list, numbered from 1 on screen)."""
-            if index < 0 or index >= len(self._note_ids):
-                self._say("I couldn't find that note")
-                return
-            note_id = self._note_ids[index]
-            note = next((n for n in self.notes if n["id"] == note_id), None)
-            if note:
-                self._show_note_popup(note)
-    
-    def _show_note_popup(self, note):
-            """Full-text view for a note — the list truncates long notes,
-            this shows the whole thing in a scrollable, read-only box."""
-            popup = tk.Toplevel(self)
-            popup.title("Note")
-            popup.geometry("480x360")
-            popup.minsize(360, 240)
-    
-            ttk.Label(
-                popup, text=note["created"], font=("Segoe UI", 9, "italic"), foreground="#555555"
-            ).pack(anchor="w", padx=12, pady=(12, 4))
-    
-            text_frame = ttk.Frame(popup)
-            text_frame.pack(fill="both", expand=True, padx=12, pady=(0, 8))
-    
-            text_widget = tk.Text(text_frame, wrap="word", font=("Segoe UI", 11))
-            scrollbar = ttk.Scrollbar(text_frame, command=text_widget.yview)
-            text_widget.configure(yscrollcommand=scrollbar.set)
-            text_widget.insert("1.0", note["text"])
-            text_widget.configure(state="disabled")  # read-only — editing isn't wired up yet
-            text_widget.pack(side="left", fill="both", expand=True)
-            scrollbar.pack(side="right", fill="y")
-    
-            ttk.Button(popup, text="Close", command=popup.destroy).pack(pady=(0, 12))
+           """index is 0-based, matching self._note_keys' order (which is
+           the same order shown in the list, numbered from 1 on screen)."""
+           if index < 0 or index >= len(self._note_keys):
+               self._say("I couldn't find that note")
+               return
+           group = self.notes.get(self._note_keys[index])
+           if group:
+               self._show_note_popup(group)
+   
+    def _show_note_popup(self, group):
+           """Full-text view for a note. Shows every entry under this
+           title, oldest first, so a note that's been added to over time
+           reads top-to-bottom like a running log on that topic."""
+           popup = tk.Toplevel(self)
+           popup.title(group["title"])
+           popup.geometry("480x360")
+           popup.minsize(360, 240)
+   
+           ttk.Label(
+               popup, text=group["title"], font=("Segoe UI", 13, "bold")
+           ).pack(anchor="w", padx=12, pady=(12, 4))
+   
+           text_frame = ttk.Frame(popup)
+           text_frame.pack(fill="both", expand=True, padx=12, pady=(0, 8))
+   
+           text_widget = tk.Text(text_frame, wrap="word", font=("Segoe UI", 11))
+           scrollbar = ttk.Scrollbar(text_frame, command=text_widget.yview)
+           text_widget.configure(yscrollcommand=scrollbar.set)
+   
+           body = "\n\n".join(f"[{e['created']}]\n{e['text']}" for e in group["entries"])
+           text_widget.insert("1.0", body)
+           text_widget.configure(state="disabled")  # read-only — editing isn't wired up yet
+           text_widget.pack(side="left", fill="both", expand=True)
+           scrollbar.pack(side="right", fill="y")
+   
+           ttk.Button(popup, text="Close", command=popup.destroy).pack(pady=(0, 12))
 
     # voice 
 
@@ -394,10 +421,19 @@ class SecondBrainWindow(tk.Toplevel):
         # Content commands — everything after the keyword is the
         # payload, sliced from the ORIGINAL text (not lowered) so notes
         # and events keep their natural capitalization.
+        # "add note <title> saying <content>" — groups into one note per
+        # title. Without "saying", there's no way to know where the
+        # title ends and the content begins, so it falls back to a
+        # shared "General" note rather than guessing wrong.
         for prefix in ("add note ", "new note ", "note "):
             if lowered.startswith(prefix):
-                self.add_note(text[len(prefix):])
-                self._say("Note saved")
+                payload = text[len(prefix):]
+                title, content = self._split_note_title(payload)
+                if not content:
+                    self._say("What should the note say?")
+                    return
+                self.add_note(title, content)
+                self._say(f"Added to {title}")
                 return
 
         for prefix in ("add event ", "new event ", "event "):
@@ -429,6 +465,21 @@ class SecondBrainWindow(tk.Toplevel):
     def _say(self, message):
         if self.speaker:
             self.speaker.say(message)
+
+    def _split_note_title(self, payload):
+        """Splits 'groceries saying buy milk' into title='groceries',
+        content='buy milk'. With no 'saying' marker, everything goes
+        into a shared 'General' note rather than guessing where a title
+        might end."""
+        marker = " saying "
+        lowered_payload = payload.lower()
+        idx = lowered_payload.find(marker)
+        if idx != -1:
+            title = payload[:idx].strip()
+            content = payload[idx + len(marker):].strip()
+            if title:
+                return title, content
+        return "General", payload.strip()
 
     def close(self):
         if self._on_close_callback:
