@@ -1,6 +1,7 @@
 # Voice commands here:
 """
-add note <text>  -> saves a note
+add note <text>  -> saves a note in General title
+add note <title> saying <text>  -> saves a note under the given title
 add event <text> -> saves an event on the selected day
 add event <text with date like september 25 at 3pm> -> saves event on the day said with a time
 next month  -> calendar foward
@@ -63,7 +64,7 @@ class SecondBrainWindow(tk.Toplevel):
         ttk.Button(header, text="← Back to hub", command=self.close).pack(side="right")
 
         self.heard_label = ttk.Label(
-            self, text="Heard: —", font=("Segoe UI", 9, "italic"), foreground="#555555"
+            self, text="Heard: ", font=("Segoe UI", 9, "italic"), foreground="#555555"
         )
         self.heard_label.pack(anchor="w", padx=16, pady=(0, 8))
 
