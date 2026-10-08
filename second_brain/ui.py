@@ -19,11 +19,44 @@ except ImportError:
     from parser import parse_event_command, parse_date_phrase, parse_number # when run standalone (e.g. Code Runner on this file)
 
 import calendar
+import re
 import tkinter as tk
 from datetime import date, datetime, timedelta
-from tkinter import ttk
+from tkinter import messagebox, ttk
 
 WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+
+# a line like "[2026-08-30 05:54] marks the start of an entry in the editable note text"
+_ENTRY_HEADER = re.compile(r"^\[(\d{4}-\d{2}-\d{2} \d{2}:\d{2})\]$")
+
+def entries_to_text(entries):
+    """Turns a note's entries into the text shown in the editor: a [timestamp] header line, then that entry's text"""
+    return "\n\n".join(f"[{e['created']}]\n{e['text']}" for e in entries)
+
+def text_to_entries(body, now=None):
+    """  
+    - Text under a [timestamp] header becomes that entry (timestamp kept).
+    - Text typed ABOVE the first header becomes a new entry stamped now.
+    - Deleting a header merges its text into the entry above it.
+    - An entry whose text was cleared out is dropped.
+    """
+    if now is None:
+        now = datetime.now().strftime("%Y-%m-%d %H:%M")
+ 
+    blocks = [[now, []]]  # [timestamp, lines]; first block = text above any header
+    for line in body.splitlines():
+        match = _ENTRY_HEADER.match(line.strip())
+        if match:
+            blocks.append([match.group(1), []])
+        else:
+            blocks[-1][1].append(line)
+ 
+    entries = []
+    for created, lines in blocks:
+        text = "\n".join(lines).strip()
+        if text:
+            entries.append({"text": text, "created": created})
+    return entries
 
 class SecondBrainWindow(tk.Toplevel):
     def __init__(self, parent, speaker=None, on_close=None):
@@ -343,32 +376,74 @@ class SecondBrainWindow(tk.Toplevel):
                self._show_note_popup(group)
    
     def _show_note_popup(self, group):
-           """Full-text view for a note. Shows every entry under this
-           title, oldest first, so a note that's been added to over time
-           reads top-to-bottom like a running log on that topic."""
+           """Full-text view for a note that is editable. Shows every entry under this
+           title, oldest first, press save, and the changes are written back to note."""
+           key = self._note_key(group["title"])
+
            popup = tk.Toplevel(self)
            popup.title(group["title"])
-           popup.geometry("480x360")
-           popup.minsize(360, 240)
+           popup.geometry("520x420")
+           popup.minsize(380, 280)
    
            ttk.Label(
                popup, text=group["title"], font=("Segoe UI", 13, "bold")
-           ).pack(anchor="w", padx=12, pady=(12, 4))
+           ).pack(anchor="w", padx=12, pady=(12, 2))
+           ttk.Label(
+               popup,
+               text="Edit freely, then press Save or Ctrl+S. Each [timestamp] line starts an entry - "
+                    "clear an entry's text to remove it.",
+               font=("Segoe UI", 8),
+               foreground="#555555",
+               wraplength=480,
+           ).pack(anchor="w", padx=12, pady=(0, 6))
    
            text_frame = ttk.Frame(popup)
-           text_frame.pack(fill="both", expand=True, padx=12, pady=(0, 8))
-   
-           text_widget = tk.Text(text_frame, wrap="word", font=("Segoe UI", 11))
+              
+           text_widget = tk.Text(text_frame, wrap="word", font=("Segoe UI", 11), undo=True, height=10)
            scrollbar = ttk.Scrollbar(text_frame, command=text_widget.yview)
            text_widget.configure(yscrollcommand=scrollbar.set)
-   
-           body = "\n\n".join(f"[{e['created']}]\n{e['text']}" for e in group["entries"])
-           text_widget.insert("1.0", body)
-           text_widget.configure(state="disabled")  # read-only — editing isn't wired up yet
+           text_widget.insert("1.0", entries_to_text(group["entries"]))
+           text_widget.edit_modified(False)  # so only the user's edits count as "unsaved"
            text_widget.pack(side="left", fill="both", expand=True)
            scrollbar.pack(side="right", fill="y")
    
-           ttk.Button(popup, text="Close", command=popup.destroy).pack(pady=(0, 12))
+           status = ttk.Label(popup, text="", font=("Segoe UI", 9), foreground="#555555")
+           
+           def save():
+                entries = text_to_entries(text_widget.get("1.0", "end"))
+                if not entries:
+                    status.config(
+                        text="Can't save an empty note - use 'Delete selected' to remove it.",
+                        foreground="#c0392b",
+                    )
+                    return
+                current = self.notes.get(key)
+                if current is None:  # note was deleted while the editor was open
+                    status.config(text="This note no longer exists.", foreground="#c0392b")
+                    return
+                current["entries"] = entries
+                self._refresh_notes()
+                text_widget.edit_modified(False)
+                status.config(text="Saved.", foreground="#2eb82e")
+    
+           def close():
+                if text_widget.edit_modified():
+                    if not messagebox.askyesno(
+                        "Unsaved changes", "Discard your unsaved changes?", parent=popup
+                 ):
+                        return
+                popup.destroy()
+    
+           buttons = ttk.Frame(popup)
+           buttons.pack(side="bottom", pady=(4, 12))
+           ttk.Button(buttons, text="Save", command=save).pack(side="left", padx=(0, 6))
+           ttk.Button(buttons, text="Close", command=close).pack(side="left")
+           status.pack(side="bottom", anchor="w", padx=12)
+           text_frame.pack(fill="both", expand=True, padx=12, pady=(0, 8))
+    
+           popup.bind("<Control-s>", lambda e: save())
+           popup.protocol("WM_DELETE_WINDOW", close)
+           text_widget.focus_set()
 
     # voice 
 
